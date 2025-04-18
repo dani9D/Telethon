@@ -1,0 +1,96 @@
+from telethon.sync import TelegramClient
+from telethon.tl.functions.channels import InviteToChannelRequest
+from telethon.errors import PeerFloodError, UserPrivacyRestrictedError
+from telethon.tl.types import User
+import pandas as pd
+import time
+import os
+
+# === CONFIGURAÇÕES INICIAIS ===
+api_id = 123456  # <-- substitua pelo seu
+api_hash = 'abc123def456ghi789'  # <-- substitua pelo seu
+phone_number = '+5511999999999'  # <-- substitua pelo seu número com DDI
+
+client = TelegramClient('session', api_id, api_hash)
+
+def login():
+    client.connect()
+    if not client.is_user_authorized():
+        client.send_code_request(phone_number)
+        code = input('Digite o código que chegou no Telegram: ')
+        client.sign_in(phone_number, code)
+
+def exportar_membros():
+    group_username = input("🔍 Digite o username ou ID do grupo público para extrair membros: ")
+    print(f"Coletando membros de {group_username}...")
+    users = client.get_participants(group_username)
+    
+    data = []
+    for user in users:
+        if isinstance(user, User) and not user.bot:
+            data.append({
+                'user_id': user.id,
+                'username': user.username,
+                'first_name': user.first_name,
+                'last_name': user.last_name
+            })
+    
+    df = pd.DataFrame(data)
+    df.to_csv('membros_extraidos.csv', index=False)
+    print(f"✅ Membros salvos em 'membros_extraidos.csv' ({len(df)} usuários)")
+
+def importar_e_adicionar():
+    if not os.path.exists('membros_extraidos.csv'):
+        print("❌ Arquivo 'membros_extraidos.csv' não encontrado. Extraia os membros primeiro.")
+        return
+
+    df = pd.read_csv('membros_extraidos.csv')
+    target_group = input("📥 Digite o username ou ID do grupo destino: ")
+
+    success = 0
+    fails = 0
+
+    for i, row in df.iterrows():
+        try:
+            user_id = int(row['user_id'])
+            print(f"Tentando adicionar: {row['first_name']} (ID: {user_id})...")
+            user = client.get_entity(user_id)
+            client(InviteToChannelRequest(target_group, [user]))
+            print("✅ Adicionado com sucesso!")
+            success += 1
+            time.sleep(10)
+        except PeerFloodError:
+            print("⚠️ Limite de convites atingido. O Telegram bloqueou temporariamente.")
+            break
+        except UserPrivacyRestrictedError:
+            print("🔒 O usuário não permite ser adicionado por estranhos.")
+            fails += 1
+        except Exception as e:
+            print(f"❌ Erro ao adicionar: {e}")
+            fails += 1
+
+    print("\n=== RESULTADO FINAL ===")
+    print(f"✅ Adicionados: {success}")
+    print(f"❌ Falhas: {fails}")
+
+def menu():
+    login()
+    while True:
+        print("\n=== MENU ===")
+        print("1. 📤 Extrair membros de grupo público")
+        print("2. 📥 Adicionar membros em outro grupo")
+        print("3. ❌ Sair")
+
+        opcao = input("Escolha uma opção (1/2/3): ")
+
+        if opcao == '1':
+            exportar_membros()
+        elif opcao == '2':
+            importar_e_adicionar()
+        elif opcao == '3':
+            print("Encerrando...")
+            break
+        else:
+            print("Opção inválida.")
+
+menu()
